@@ -1,0 +1,6 @@
+/target
+.env
+.out
+.next
+dist
+node_modules
