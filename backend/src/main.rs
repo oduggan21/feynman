@@ -1,4 +1,5 @@
 mod routes;
+mod openai;
 use axum::{routing::any,
         Router,
         };
