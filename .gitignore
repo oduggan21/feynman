@@ -1,0 +1,8 @@
+/backend/target/
+/front/node_modules/
+
+# Vite build output
+front/dist/
+
+# macOS junk
+.DS_Store
