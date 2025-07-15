@@ -2,7 +2,6 @@ use axum::{
     extract::ws::{WebSocketUpgrade, WebSocket, Message},
     response::{Response},
 };
-
 use std::env;
 
 use crate::openai::OASocket; 
@@ -10,10 +9,11 @@ use tokio_tungstenite::tungstenite;
 
 const FEYNMAN_PROMPT: &str = include_str!("../feynman_prompt.txt"); 
 
+
 pub async fn handle_ws(ws: WebSocketUpgrade) -> Response {
+    dotenvy::dotenv().ok();
     ws.on_upgrade(socket_task)
 }
-
 async fn socket_task(mut browser_ws: WebSocket){
     let key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
     let mut oa = match OASocket::connect(&key, FEYNMAN_PROMPT).await{
