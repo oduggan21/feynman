@@ -18,7 +18,7 @@ pub struct OASocket{
 impl OASocket{
     pub async fn connect(api_key: &str, system_prompt: &str) -> Result<Self>{
         let url = "wss://api.openai.com/v1/realtime/ws/audio?model=gpt-4o-realtime-preview";
-        let mut req = url.into_client_request();   
+        let mut req = url.into_client_request()?;   
         req.headers_mut().insert("Authorization", format!("Bearer {api_key}").parse()?);
         req.headers_mut().insert("OpenAI-Beta", "realtime=v1".parse()?);
 
@@ -31,20 +31,22 @@ impl OASocket{
             .await?;
 
         write
-            .send(Message::Text(format!(
-                r#"{{"messages":[{{"role":"system","content":"{system_prompt}"}}]}}"#
-            )))
+            .send(Message::Text(
+                format!(
+                    r#"{{"messages":[{{"role":"system","content":"{system_prompt}"}}]}}"#,
+                ).into()
+            ))
             .await?;
 
         Ok(Self { write, read })
      }
 
-     pub async fn send_audio(&mut self, data: Vec<u8>) -> Result<()>{
-        self.write.send(Message::Binary(data)).await?;
-        Ok(())
-     }
-     pub async fn next(&mut self) -> Result<Message> {
-        let msg = self.read.next().await.ok_or_else(|| anyhow::anyhow!("Failed to receive message"))?;
+    pub async fn send_audio(&mut self, data: axum::body::Bytes) -> Result<()>{
+            self.write.send(Message::Binary(data)).await?;
+            Ok(())
+         }
+    pub async fn next(&mut self) -> Result<Message> {
+        let msg = self.read.next().await.ok_or_else(|| anyhow::anyhow!("Failed to receive message"))??;
         Ok(msg)
      }
 }

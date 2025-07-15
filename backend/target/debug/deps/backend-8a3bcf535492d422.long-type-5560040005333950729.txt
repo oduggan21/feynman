@@ -1,0 +1,1 @@
+futures_util::sink::Send<'_, SplitSink<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, tokio_tungstenite::tungstenite::Message>, tokio_tungstenite::tungstenite::Message>

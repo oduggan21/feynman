@@ -1,12 +1,12 @@
 use axum::{
     extract::ws::{WebSocketUpgrade, WebSocket, Message},
-    response::{IntoResponse, Response},
+    response::{Response},
 };
 
-use futures_util::{SinkExt, StreamExt};
 use std::env;
 
 use crate::openai::OASocket; 
+use tokio_tungstenite::tungstenite;
 
 const FEYNMAN_PROMPT: &str = include_str!("../feynman_prompt.txt"); 
 
@@ -22,21 +22,50 @@ async fn socket_task(mut browser_ws: WebSocket){
             return; }
     };
     loop {
-        tokio::select!{
-            Some(Ok(Message::Binary(buf))) = browser_ws.recv() => {
-                if let Err(e) = oa.send_audio(buf).await {
-                    eprintln!("Failed to send audio: {}", e);
-                    break;
+        tokio::select! {
+            msg = browser_ws.recv() => {
+                match msg {
+                    Some(Ok(Message::Binary(buf))) => {
+                        if let Err(e) = oa.send_audio(buf).await {
+                            eprintln!("Failed to send audio: {}", e);
+                            break;
+                        }
+                    }
+                    Some(Ok(_)) => {
+                        // Ignore other message types
+                    }
+                    Some(Err(e)) => {
+                        eprintln!("WebSocket receive error: {}", e);
+                        break;
+                    }
+                    None => break,
+                }
+            },
+            oa_msg = oa.next() => {
+                match oa_msg {
+                    Ok(tungstenite::Message::Binary(audio)) => {
+                        if browser_ws.send(Message::Binary(audio)).await.is_err() {
+                            eprintln!("Failed to send audio to browser");
+                            break;
+                        }
+                    }
+                    Ok(tungstenite::Message::Text(text)) => {
+                       
+                        if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
+                            eprintln!("Failed to send text to browser");
+                            break;
+                        }
+                    }
+                    Ok(_) => {
+                        // Ignore other message types
+                    }
+                    Err(e) => {
+                        eprintln!("OpenAI socket error: {}", e);
+                        break;
+                    }
                 }
             }
-            Ok(Message::Binary(audio)) = oa.next() => {
-                if browser_ws.send(Message::Binary(audio)).await.is_err() {
-                    eprintln!("Failed to send audio to browser");
-                    break;
-                }
             }
-            else => break;
         }
     }
 
-}
