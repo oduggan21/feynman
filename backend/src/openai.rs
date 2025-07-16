@@ -2,6 +2,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use anyhow::Result;
+use serde_json::json;
 
 pub struct OASocket{
     // create a websocket object to send messages to OpenAI
@@ -30,44 +31,50 @@ impl OASocket{
         
         let (mut write, mut read) = ws.split();
         
-         // Wait for OpenAI session response
+        // Wait for OpenAI session response
         if let Some(msg) = read.next().await {
             println!("OpenAI session response: {:?}", msg);
         } else {
             return Err(anyhow::anyhow!("No initial response from OpenAI"));
         }
         
-        // Send configuration messages
-        println!("Sending audio configuration...");
-        write.send(Message::Text(
-                r#"{"audio":{"sample_rate":48000,"channels":1,"voice":"alloy"}}"#.into(),
-            ))
-            .await?;
-
-        println!("Sending system prompt...");
-        write
-            .send(Message::Text(
-                format!(
-                    r#"{{"messages":[{{"role":"system","content":"{system_prompt}"}}]}}"#,
-                ).into()
-            ))
-            .await?;
+        // Send proper session.update configuration message
+        println!("Sending session.update configuration...");
+        let config = json!({
+            "type": "session.update",
+            "session": {
+                "modalities": ["text", "audio"],
+                "instructions": system_prompt,
+                "voice": "alloy",
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 200,
+                    "create_response": true,
+                    "interrupt_response": true
+                }
+            }
+        });
+        write.send(Message::Text(config.to_string().into())).await?;
 
         println!("OpenAI connection setup complete");
         Ok(Self { write, read })
      }
 
     pub async fn send_audio(&mut self, data: axum::body::Bytes) -> Result<()>{
-            self.write.send(Message::Binary(data)).await?;
-            Ok(())
-         }
+        self.write.send(Message::Binary(data)).await?;
+        Ok(())
+    }
     pub async fn next(&mut self) -> Result<Message> {
         let msg = self.read.next().await.ok_or_else(|| anyhow::anyhow!("Failed to receive message"))??;
         Ok(msg)
-     }
+    }
     pub async fn close(&mut self) -> anyhow::Result<()> {
-    use futures_util::SinkExt;
-    self.write.send(tokio_tungstenite::tungstenite::Message::Close(None)).await?;
-    Ok(())
+        use futures_util::SinkExt;
+        self.write.send(tokio_tungstenite::tungstenite::Message::Close(None)).await?;
+        Ok(())
     }
 }

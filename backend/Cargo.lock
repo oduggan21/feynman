@@ -127,6 +127,8 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "rustls",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-tungstenite 0.27.0",
  "tungstenite 0.27.0",
