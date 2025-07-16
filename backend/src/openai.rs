@@ -23,8 +23,12 @@ impl OASocket{
         req.headers_mut().insert("OpenAI-Beta", "realtime=v1".parse()?);
 
         let (ws, _) = connect_async(req).await?;
-        let (mut write, read) = ws.split();
-
+        let (mut write, mut read) = ws.split();
+        
+         // Wait for OpenAI session response
+        if let Some(msg) = read.next().await {
+            println!("OpenAI session response: {:?}", msg);
+    }
         write.send(Message::Text(
                 r#"{"audio":{"sample_rate":48000,"channels":1,"voice":"alloy"}}"#.into(),
             ))

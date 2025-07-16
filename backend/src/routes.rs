@@ -67,8 +67,14 @@ async fn socket_task(mut browser_ws: WebSocket){
                             break;
                         }
                     }
-                     Ok(tungstenite::Message::Close(_)) | Err(_) => {
-                        eprintln!("OpenAI WebSocket closed or errored");
+                     Ok(tungstenite::Message::Close(_)) => {
+                        eprintln!("OpenAI WebSocket closed");
+                        let _ = browser_ws.send(Message::Close(None)).await;
+                        oa.close().await.ok();
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("OpenAI WebSocket errored: {:?}", e);
                         let _ = browser_ws.send(Message::Close(None)).await;
                         oa.close().await.ok();
                         break;
