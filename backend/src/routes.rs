@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::openai::OASocket; 
 use tokio_tungstenite::tungstenite;
+use base64;
 
 const FEYNMAN_PROMPT: &str = include_str!("../feynman_prompt.txt"); 
 
@@ -150,10 +151,40 @@ async fn socket_task_test_mode(mut browser_ws: WebSocket) {
             }
             Some(Ok(Message::Text(text))) => {
                 eprintln!("Test mode: received text message: {}", text);
-                let response = format!("Test mode echo: {}", text);
-                if let Err(e) = browser_ws.send(Message::Text(response.into())).await {
-                    eprintln!("Failed to send text echo: {}", e);
-                    break;
+                
+                if text == "commit_audio" {
+                    // Simulate OpenAI text response
+                    let mock_response = r#"{"type":"response.audio.delta","delta":"dGVzdCBhdWRpbyBkYXRh"}"#;
+                    if let Err(e) = browser_ws.send(Message::Text(mock_response.into())).await {
+                        eprintln!("Failed to send mock response: {}", e);
+                        break;
+                    }
+                    
+                    // Simulate audio response with actual PCM16 data (1 second of 440Hz tone)
+                    let sample_rate = 16000;
+                    let duration = 1.0; // 1 second
+                    let frequency = 440.0; // A4 note
+                    let samples = (sample_rate as f32 * duration) as usize;
+                    let mut audio_data = Vec::with_capacity(samples * 2); // 2 bytes per sample for PCM16
+                    
+                    for i in 0..samples {
+                        let t = i as f32 / sample_rate as f32;
+                        let amplitude = 0.3; // Reduce volume
+                        let sample = (amplitude * (2.0 * std::f32::consts::PI * frequency * t).sin() * 32767.0) as i16;
+                        audio_data.extend_from_slice(&sample.to_le_bytes());
+                    }
+                    
+                    eprintln!("Test mode: sending {} bytes of mock audio", audio_data.len());
+                    if let Err(e) = browser_ws.send(Message::Binary(audio_data.into())).await {
+                        eprintln!("Failed to send mock audio: {}", e);
+                        break;
+                    }
+                } else {
+                    let response = format!("Test mode echo: {}", text);
+                    if let Err(e) = browser_ws.send(Message::Text(response.into())).await {
+                        eprintln!("Failed to send text echo: {}", e);
+                        break;
+                    }
                 }
             }
             Some(Ok(Message::Close(_))) => {
@@ -265,6 +296,39 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                     Ok(tungstenite::Message::Text(text)) => {
                         eprintln!("Received text from OpenAI: {}", text);
                         
+                        // Parse the JSON response to extract audio data
+                        if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(event_type) = json_value.get("type").and_then(|t| t.as_str()) {
+                                match event_type {
+                                    "response.audio.delta" => {
+                                        if let Some(delta) = json_value.get("delta").and_then(|d| d.as_str()) {
+                                            // Decode base64 audio data
+                                            if let Ok(audio_bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, delta) {
+                                                eprintln!("Sending {} bytes of audio to browser", audio_bytes.len());
+                                                if browser_ws.send(Message::Binary(audio_bytes.into())).await.is_err() {
+                                                    eprintln!("Failed to send audio to browser");
+                                                    let _ = browser_ws.send(Message::Close(None)).await;
+                                                    oa.close().await.ok();
+                                                    break;
+                                                }
+                                            } else {
+                                                eprintln!("Failed to decode base64 audio data");
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        // For non-audio events, send the text to browser for debugging
+                                        if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
+                                            eprintln!("Failed to send text to browser");
+                                            let _ = browser_ws.send(Message::Close(None)).await;
+                                            oa.close().await.ok();
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Handle conversation state based on OpenAI response
                         let _should_update_state = {
                             let _ctx = context.lock().await;
@@ -272,13 +336,6 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                             // This is where we would implement the Feynman tutor logic
                             false
                         };
-                       
-                        if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
-                            eprintln!("Failed to send text to browser");
-                            let _ = browser_ws.send(Message::Close(None)).await;
-                            oa.close().await.ok();
-                            break;
-                        }
                     }
                      Ok(tungstenite::Message::Close(_)) => {
                         eprintln!("OpenAI WebSocket closed");
