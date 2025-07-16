@@ -18,22 +18,33 @@ pub struct OASocket{
 impl OASocket{
     pub async fn connect(api_key: &str, system_prompt: &str) -> Result<Self>{
         let url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
+        println!("Attempting to connect to OpenAI at: {}", url);
+        
         let mut req = url.into_client_request()?;   
         req.headers_mut().insert("Authorization", format!("Bearer {api_key}").parse()?);
         req.headers_mut().insert("OpenAI-Beta", "realtime=v1".parse()?);
 
-        let (ws, _) = connect_async(req).await?;
+        println!("Connecting to OpenAI WebSocket...");
+        let (ws, response) = connect_async(req).await?;
+        println!("OpenAI WebSocket connected successfully. Response status: {:?}", response.status());
+        
         let (mut write, mut read) = ws.split();
         
          // Wait for OpenAI session response
         if let Some(msg) = read.next().await {
             println!("OpenAI session response: {:?}", msg);
-    }
+        } else {
+            return Err(anyhow::anyhow!("No initial response from OpenAI"));
+        }
+        
+        // Send configuration messages
+        println!("Sending audio configuration...");
         write.send(Message::Text(
                 r#"{"audio":{"sample_rate":48000,"channels":1,"voice":"alloy"}}"#.into(),
             ))
             .await?;
 
+        println!("Sending system prompt...");
         write
             .send(Message::Text(
                 format!(
@@ -42,6 +53,7 @@ impl OASocket{
             ))
             .await?;
 
+        println!("OpenAI connection setup complete");
         Ok(Self { write, read })
      }
 
