@@ -1,8 +1,7 @@
 use axum::{
     extract::ws::{WebSocketUpgrade, WebSocket, Message},
-    response::{Response},
+    response::{Response, IntoResponse},
 };
-use std::env;
 
 use crate::openai::OASocket; 
 use tokio_tungstenite::tungstenite;
@@ -12,29 +11,50 @@ const FEYNMAN_PROMPT: &str = include_str!("../feynman_prompt.txt");
 
 pub async fn handle_ws(ws: WebSocketUpgrade) -> Response {
     dotenvy::dotenv().ok();
-    ws.on_upgrade(socket_task)
-}
-async fn socket_task(mut browser_ws: WebSocket){
-    let key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not set");
-    let mut oa = match OASocket::connect(&key, FEYNMAN_PROMPT).await{
-        Ok(s) => s,
-        Err(e) =>{eprintln!("Failed to connect to OpenAI: {}", e);
-            return; }
+    
+    // Validate API key exists before accepting WebSocket connections
+    let api_key = match std::env::var("OPENAI_API_KEY") {
+        Ok(key) if !key.is_empty() && key != "your_openai_api_key_here" => key,
+        _ => {
+            eprintln!("ERROR: OPENAI_API_KEY is not set or is invalid");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
+    
+    println!("WebSocket connection request received, API key validated");
+    ws.on_upgrade(move |socket| socket_task(socket, api_key))
+}
+async fn socket_task(mut browser_ws: WebSocket, api_key: String){
+    println!("WebSocket connection established with browser, connecting to OpenAI...");
+    
+    let mut oa = match OASocket::connect(&api_key, FEYNMAN_PROMPT).await{
+        Ok(s) => {
+            println!("Successfully connected to OpenAI, ready to relay messages");
+            s
+        },
+        Err(e) => {
+            eprintln!("Failed to connect to OpenAI: {}", e);
+            let error_msg = format!("Failed to connect to OpenAI: {}", e);
+            let _ = browser_ws.send(Message::Text(error_msg.into())).await;
+            let _ = browser_ws.send(Message::Close(None)).await;
+            return;
+        }
+    };
+    
     loop {
         tokio::select! {
             msg = browser_ws.recv() => {
                 match msg {
                     Some(Ok(Message::Binary(buf))) => {
                         if let Err(e) = oa.send_audio(buf).await {
-                            eprintln!("Failed to send audio: {}", e);
+                            eprintln!("Failed to send audio to OpenAI: {}", e);
                             let _ = browser_ws.send(Message::Close(None)).await;
                             oa.close().await.ok();
                             break;
                         }
                     }
                      Some(Ok(Message::Close(_))) | None => {
-                        eprintln!("Browser WebSocket closed");
+                        println!("Browser WebSocket closed gracefully");
                         oa.close().await.ok();
                         break;
                     }
@@ -45,7 +65,6 @@ async fn socket_task(mut browser_ws: WebSocket){
                         eprintln!("WebSocket receive error: {}", e);
                         break;
                     }
-                    None => break,
                 }
             },
             oa_msg = oa.next() => {
@@ -59,7 +78,7 @@ async fn socket_task(mut browser_ws: WebSocket){
                         }
                     }
                     Ok(tungstenite::Message::Text(text)) => {
-                       
+                        println!("Received text from OpenAI: {}", text);
                         if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
                             eprintln!("Failed to send text to browser");
                             let _ = browser_ws.send(Message::Close(None)).await;
@@ -78,7 +97,8 @@ async fn socket_task(mut browser_ws: WebSocket){
                     }
                 }
             }
-            }
         }
     }
+    println!("WebSocket session ended");
+}
 

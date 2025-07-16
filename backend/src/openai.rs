@@ -2,6 +2,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use anyhow::Result;
+use base64::Engine;
 
 pub struct OASocket{
     // create a websocket object to send messages to OpenAI
@@ -22,29 +23,52 @@ impl OASocket{
         req.headers_mut().insert("Authorization", format!("Bearer {api_key}").parse()?);
         req.headers_mut().insert("OpenAI-Beta", "realtime=v1".parse()?);
 
-        let (ws, _) = connect_async(req).await?;
+        println!("Attempting to connect to OpenAI realtime API...");
+        let (ws, response) = connect_async(req).await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to OpenAI: {}", e))?;
+        
+        println!("Connected to OpenAI (status: {})", response.status());
         let (mut write, read) = ws.split();
 
-        write.send(Message::Text(
-                r#"{"audio":{"sample_rate":48000,"channels":1,"voice":"alloy"}}"#.into(),
-            ))
-            .await?;
+        // Send session configuration according to OpenAI Realtime API spec
+        let session_config = serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "modalities": ["text", "audio"],
+                "instructions": system_prompt,
+                "voice": "alloy",
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "input_audio_transcription": {
+                    "model": "whisper-1"
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 200
+                }
+            }
+        });
 
-        write
-            .send(Message::Text(
-                format!(
-                    r#"{{"messages":[{{"role":"system","content":"{system_prompt}"}}]}}"#,
-                ).into()
-            ))
-            .await?;
+        println!("Sending session configuration to OpenAI...");
+        write.send(Message::Text(session_config.to_string().into())).await
+            .map_err(|e| anyhow::anyhow!("Failed to send session config: {}", e))?;
 
+        println!("OpenAI connection established successfully");
         Ok(Self { write, read })
      }
 
     pub async fn send_audio(&mut self, data: axum::body::Bytes) -> Result<()>{
-            self.write.send(Message::Binary(data)).await?;
-            Ok(())
-         }
+        // Convert Float32Array to PCM16 format for OpenAI
+        let audio_event = serde_json::json!({
+            "type": "input_audio_buffer.append",
+            "audio": base64::prelude::BASE64_STANDARD.encode(&data)
+        });
+        
+        self.write.send(Message::Text(audio_event.to_string().into())).await?;
+        Ok(())
+    }
     pub async fn next(&mut self) -> Result<Message> {
         let msg = self.read.next().await.ok_or_else(|| anyhow::anyhow!("Failed to receive message"))??;
         Ok(msg)
