@@ -129,13 +129,40 @@ async fn socket_task(mut browser_ws: WebSocket){
 async fn socket_task_test_mode(mut browser_ws: WebSocket) {
     eprintln!("Test mode: simulating OpenAI responses");
     
+    let mut conversation_step = 0;
+    
     loop {
         match browser_ws.recv().await {
             Some(Ok(Message::Binary(audio_data))) => {
                 eprintln!("Test mode: received {} bytes of audio data", audio_data.len());
                 
-                // Simulate OpenAI text response
-                let mock_response = r#"{"type":"response.audio.delta","delta":"dGVzdCBhdWRpbyBkYXRh"}"#;
+                // Simulate different responses based on conversation step
+                let mock_response = match conversation_step {
+                    0 => {
+                        conversation_step += 1;
+                        r#"{"type":"response.audio_transcript.done","transcript":"Hello there! I am Feynman, your AI learning companion. What topic would you like to teach me today?"}"#
+                    }
+                    1 => {
+                        conversation_step += 1;
+                        r#"{"type":"response.audio_transcript.done","transcript":"photosynthesis"}"#
+                    }
+                    2 => {
+                        conversation_step += 1;
+                        r#"{"type":"response.audio_transcript.done","transcript":"Awesome! I'm ready to start learning about photosynthesis whenever you are. Please go ahead and teach me everything you know about this topic."}"#
+                    }
+                    3 => {
+                        conversation_step += 1;
+                        r#"{"type":"response.audio_transcript.done","transcript":"What role does chlorophyll play in capturing light energy?"}"#
+                    }
+                    4 => {
+                        conversation_step += 1;
+                        r#"{"type":"response.audio_transcript.done","transcript":"Can you explain the difference between the light-dependent and light-independent reactions?"}"#
+                    }
+                    _ => {
+                        r#"{"type":"response.audio_transcript.done","transcript":"Excellent work! You've demonstrated a solid understanding of photosynthesis. Well done!"}"#
+                    }
+                };
+                
                 if let Err(e) = browser_ws.send(Message::Text(mock_response.into())).await {
                     eprintln!("Failed to send mock response: {}", e);
                     break;
@@ -150,10 +177,21 @@ async fn socket_task_test_mode(mut browser_ws: WebSocket) {
             }
             Some(Ok(Message::Text(text))) => {
                 eprintln!("Test mode: received text message: {}", text);
-                let response = format!("Test mode echo: {}", text);
-                if let Err(e) = browser_ws.send(Message::Text(response.into())).await {
-                    eprintln!("Failed to send text echo: {}", e);
-                    break;
+                
+                if text == "commit_audio" {
+                    eprintln!("Test mode: simulating audio commit and response creation");
+                    // Send response done event
+                    let response_done = r#"{"type":"response.done"}"#;
+                    if let Err(e) = browser_ws.send(Message::Text(response_done.into())).await {
+                        eprintln!("Failed to send response done: {}", e);
+                        break;
+                    }
+                } else {
+                    let response = format!("Test mode echo: {}", text);
+                    if let Err(e) = browser_ws.send(Message::Text(response.into())).await {
+                        eprintln!("Failed to send text echo: {}", e);
+                        break;
+                    }
                 }
             }
             Some(Ok(Message::Close(_))) => {
@@ -184,7 +222,7 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
         audio_buffer_has_data: false,
     }));
 
-    // Send initial greeting
+    // Send initial greeting by creating a response
     let _ = oa.create_response().await;
 
     loop {
@@ -265,13 +303,25 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                     Ok(tungstenite::Message::Text(text)) => {
                         eprintln!("Received text from OpenAI: {}", text);
                         
-                        // Handle conversation state based on OpenAI response
-                        let _should_update_state = {
-                            let _ctx = context.lock().await;
-                            // Parse the response and update conversation state if needed
-                            // This is where we would implement the Feynman tutor logic
-                            false
-                        };
+                        // Update conversation state based on OpenAI response
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(response_type) = parsed.get("type").and_then(|t| t.as_str()) {
+                                match response_type {
+                                    "response.audio_transcript.done" => {
+                                        if let Some(transcript) = parsed.get("transcript").and_then(|t| t.as_str()) {
+                                            eprintln!("User said: {}", transcript);
+                                            update_conversation_state(&context, transcript).await;
+                                        }
+                                    }
+                                    "response.done" => {
+                                        eprintln!("OpenAI response completed");
+                                    }
+                                    _ => {
+                                        // Handle other response types as needed
+                                    }
+                                }
+                            }
+                        }
                        
                         if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
                             eprintln!("Failed to send text to browser");
@@ -300,4 +350,54 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
             }
         }
     }
+
+async fn update_conversation_state(context: &Arc<Mutex<ConversationContext>>, transcript: &str) {
+    let mut ctx = context.lock().await;
+    
+    match ctx.state {
+        ConversationState::Initial => {
+            // After greeting, look for topic in user's response
+            if !transcript.trim().is_empty() && transcript.len() > 10 {
+                ctx.topic = Some(transcript.to_string());
+                ctx.state = ConversationState::WaitingForTopic;
+                eprintln!("Detected topic: {}", transcript);
+            }
+        }
+        ConversationState::WaitingForTopic => {
+            // Topic acknowledged, ready for teaching
+            ctx.state = ConversationState::ReadyToTeach;
+            eprintln!("Ready to receive teaching about: {:?}", ctx.topic);
+        }
+        ConversationState::ReadyToTeach => {
+            // User starts teaching
+            ctx.state = ConversationState::Teaching;
+            eprintln!("User started teaching");
+        }
+        ConversationState::Teaching => {
+            // User finished teaching, analyze and generate questions
+            ctx.state = ConversationState::Analyzing;
+            eprintln!("User finished teaching, moving to analysis");
+        }
+        ConversationState::Analyzing => {
+            // Move to questioning phase
+            ctx.state = ConversationState::Questioning;
+            ctx.current_question_index = 0;
+            eprintln!("Moving to questioning phase");
+        }
+        ConversationState::Questioning => {
+            // Handle question responses
+            ctx.current_question_index += 1;
+            eprintln!("Question {} answered", ctx.current_question_index);
+            
+            // For now, assume 3 questions max
+            if ctx.current_question_index >= 3 {
+                ctx.state = ConversationState::Complete;
+                eprintln!("All questions answered, conversation complete");
+            }
+        }
+        ConversationState::Complete => {
+            eprintln!("Conversation is complete");
+        }
+    }
+}
 

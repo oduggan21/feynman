@@ -32,6 +32,8 @@ export default function App() {
         // Update connection status based on message content
         if (e.data.includes("Connected to OpenAI")) {
           setConnectionStatus("Connected to OpenAI - Ready to start");
+        } else if (e.data.includes("TEST_MODE")) {
+          setConnectionStatus("Test Mode - Ready to start");
         } else if (e.data.includes("OpenAI connection failed")) {
           setConnectionStatus("OpenAI connection failed");
         }
