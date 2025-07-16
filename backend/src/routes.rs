@@ -243,24 +243,35 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                         
                         // Handle special browser commands
                         if text == "commit_audio" {
+                            eprintln!("Processing commit_audio command");
                             let should_commit = {
                                 let ctx = context.lock().await;
-                                ctx.audio_buffer_has_data
+                                let has_data = ctx.audio_buffer_has_data;
+                                eprintln!("Audio buffer has data: {}", has_data);
+                                has_data
                             };
                             
                             if should_commit {
+                                eprintln!("Committing audio buffer and creating response");
                                 if let Err(e) = oa.commit_audio_buffer().await {
                                     eprintln!("Failed to commit audio buffer: {}", e);
+                                } else {
+                                    eprintln!("Audio buffer committed successfully");
                                 }
                                 if let Err(e) = oa.create_response().await {
                                     eprintln!("Failed to create response: {}", e);
+                                } else {
+                                    eprintln!("Response creation requested successfully");
                                 }
                                 
                                 // Reset audio buffer tracking
                                 {
                                     let mut ctx = context.lock().await;
                                     ctx.audio_buffer_has_data = false;
+                                    eprintln!("Reset audio buffer tracking");
                                 }
+                            } else {
+                                eprintln!("No audio data to commit, skipping");
                             }
                         }
                     }
