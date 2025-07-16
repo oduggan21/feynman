@@ -3,11 +3,32 @@ use axum::{
     response::{Response},
 };
 use std::env;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::openai::OASocket; 
 use tokio_tungstenite::tungstenite;
 
 const FEYNMAN_PROMPT: &str = include_str!("../feynman_prompt.txt"); 
+
+#[derive(Debug, Clone, PartialEq)]
+enum ConversationState {
+    Initial,
+    WaitingForTopic,
+    ReadyToTeach,
+    Teaching,
+    Analyzing,
+    Questioning,
+    Complete,
+}
+
+struct ConversationContext {
+    state: ConversationState,
+    topic: Option<String>,
+    questions: Vec<String>,
+    current_question_index: usize,
+    audio_buffer_has_data: bool,
+} 
 
 
 pub async fn handle_ws(ws: WebSocketUpgrade) -> Response {
@@ -155,12 +176,30 @@ async fn socket_task_test_mode(mut browser_ws: WebSocket) {
 }
 
 async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
+    let context = Arc::new(Mutex::new(ConversationContext {
+        state: ConversationState::Initial,
+        topic: None,
+        questions: Vec::new(),
+        current_question_index: 0,
+        audio_buffer_has_data: false,
+    }));
+
+    // Send initial greeting
+    let _ = oa.create_response().await;
+
     loop {
         tokio::select! {
             msg = browser_ws.recv() => {
                 match msg {
                     Some(Ok(Message::Binary(buf))) => {
                         eprintln!("Received audio frame from browser: {} bytes", buf.len());
+                        
+                        // Track that we have audio data
+                        {
+                            let mut ctx = context.lock().await;
+                            ctx.audio_buffer_has_data = true;
+                        }
+                        
                         if let Err(e) = oa.send_audio(buf).await {
                             eprintln!("Failed to send audio: {}", e);
                             let _ = browser_ws.send(Message::Close(None)).await;
@@ -168,7 +207,33 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                             break;
                         }
                     }
-                     Some(Ok(Message::Close(_))) => {
+                    Some(Ok(Message::Text(text))) => {
+                        eprintln!("Received text from browser: {}", text);
+                        
+                        // Handle special browser commands
+                        if text == "commit_audio" {
+                            let should_commit = {
+                                let ctx = context.lock().await;
+                                ctx.audio_buffer_has_data
+                            };
+                            
+                            if should_commit {
+                                if let Err(e) = oa.commit_audio_buffer().await {
+                                    eprintln!("Failed to commit audio buffer: {}", e);
+                                }
+                                if let Err(e) = oa.create_response().await {
+                                    eprintln!("Failed to create response: {}", e);
+                                }
+                                
+                                // Reset audio buffer tracking
+                                {
+                                    let mut ctx = context.lock().await;
+                                    ctx.audio_buffer_has_data = false;
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
                         eprintln!("Browser WebSocket closed");
                         oa.close().await.ok();
                         break;
@@ -198,6 +263,15 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                         }
                     }
                     Ok(tungstenite::Message::Text(text)) => {
+                        eprintln!("Received text from OpenAI: {}", text);
+                        
+                        // Handle conversation state based on OpenAI response
+                        let _should_update_state = {
+                            let _ctx = context.lock().await;
+                            // Parse the response and update conversation state if needed
+                            // This is where we would implement the Feynman tutor logic
+                            false
+                        };
                        
                         if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
                             eprintln!("Failed to send text to browser");

@@ -3,6 +3,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use anyhow::Result;
 use serde_json::json;
+use base64;
 
 pub struct OASocket{
     // create a websocket object to send messages to OpenAI
@@ -65,7 +66,36 @@ impl OASocket{
      }
 
     pub async fn send_audio(&mut self, data: axum::body::Bytes) -> Result<()>{
-        self.write.send(Message::Binary(data)).await?;
+        // Convert audio data to base64 for OpenAI realtime API
+        let audio_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+        
+        // Create proper input_audio_buffer.append event
+        let audio_event = json!({
+            "type": "input_audio_buffer.append",
+            "audio": audio_base64
+        });
+        
+        self.write.send(Message::Text(audio_event.to_string().into())).await?;
+        Ok(())
+    }
+
+    pub async fn commit_audio_buffer(&mut self) -> Result<()> {
+        let commit_event = json!({
+            "type": "input_audio_buffer.commit"
+        });
+        self.write.send(Message::Text(commit_event.to_string().into())).await?;
+        Ok(())
+    }
+
+    pub async fn create_response(&mut self) -> Result<()> {
+        let response_event = json!({
+            "type": "response.create",
+            "response": {
+                "modalities": ["text", "audio"],
+                "instructions": "Follow the Feynman tutor protocol."
+            }
+        });
+        self.write.send(Message::Text(response_event.to_string().into())).await?;
         Ok(())
     }
     pub async fn next(&mut self) -> Result<Message> {
