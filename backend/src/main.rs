@@ -6,23 +6,12 @@ use axum::{routing::any,
         };
 use crate::routes::handle_ws;
 
-use std::sync::Arc;
-use rustls::crypto::CryptoProvider;
+use rustls::crypto::ring;
 
 #[tokio::main]
 async fn main() {
-    // 1) Grab the Arc<CryptoProvider>
-    let provider_arc = CryptoProvider::get_default()
-        .expect("No default CryptoProvider available");
-
-    // 2) Clone the inner `CryptoProvider` (leaves `provider_arc` intact)
-    let provider_clone = <CryptoProvider as Clone>::clone(&*provider_arc);
-    //                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    // this calls the `Clone` impl on `CryptoProvider`,
-    // not on the Arc itself
-
-    // 3) Move that clone into install_default()
-    provider_clone
+    // Install the ring-based crypto provider so rustls can operate.
+    ring::default_provider()
         .install_default()
         .expect("Failed to install CryptoProvider");
 
