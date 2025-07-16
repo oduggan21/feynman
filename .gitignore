@@ -4,5 +4,9 @@
 # Vite build output
 front/dist/
 
+# Environment variables
+.env
+backend/.env
+
 # macOS junk
 .DS_Store
