@@ -28,8 +28,15 @@ async fn socket_task(mut browser_ws: WebSocket){
                     Some(Ok(Message::Binary(buf))) => {
                         if let Err(e) = oa.send_audio(buf).await {
                             eprintln!("Failed to send audio: {}", e);
+                            let _ = browser_ws.send(Message::Close(None)).await;
+                            oa.close().await.ok();
                             break;
                         }
+                    }
+                     Some(Ok(Message::Close(_))) | None => {
+                        eprintln!("Browser WebSocket closed");
+                        oa.close().await.ok();
+                        break;
                     }
                     Some(Ok(_)) => {
                         // Ignore other message types
@@ -46,6 +53,8 @@ async fn socket_task(mut browser_ws: WebSocket){
                     Ok(tungstenite::Message::Binary(audio)) => {
                         if browser_ws.send(Message::Binary(audio)).await.is_err() {
                             eprintln!("Failed to send audio to browser");
+                            let _ = browser_ws.send(Message::Close(None)).await;
+                            oa.close().await.ok();
                             break;
                         }
                     }
@@ -53,15 +62,19 @@ async fn socket_task(mut browser_ws: WebSocket){
                        
                         if browser_ws.send(axum::extract::ws::Message::Text(text.to_string().into())).await.is_err() {
                             eprintln!("Failed to send text to browser");
+                            let _ = browser_ws.send(Message::Close(None)).await;
+                            oa.close().await.ok();
                             break;
                         }
                     }
+                     Ok(tungstenite::Message::Close(_)) | Err(_) => {
+                        eprintln!("OpenAI WebSocket closed or errored");
+                        let _ = browser_ws.send(Message::Close(None)).await;
+                        oa.close().await.ok();
+                        break;
+                    }
                     Ok(_) => {
                         // Ignore other message types
-                    }
-                    Err(e) => {
-                        eprintln!("OpenAI socket error: {}", e);
-                        break;
                     }
                 }
             }

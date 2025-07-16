@@ -18,8 +18,6 @@ async fn main() {
     // You can still use `provider_arc` later if you like.
     // …
 
-
-
     let app = Router::new().route("/ws", any(handle_ws));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
