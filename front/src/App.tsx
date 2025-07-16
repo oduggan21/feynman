@@ -34,6 +34,8 @@ export default function App() {
           setConnectionStatus("Connected to OpenAI - Ready to start");
         } else if (e.data.includes("OpenAI connection failed")) {
           setConnectionStatus("OpenAI connection failed");
+        } else if (e.data.includes("TEST_MODE")) {
+          setConnectionStatus("Test Mode - Ready to start");
         }
       } else {
         // Handle binary audio data
