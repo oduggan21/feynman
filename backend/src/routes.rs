@@ -26,6 +26,7 @@ async fn socket_task(mut browser_ws: WebSocket){
             msg = browser_ws.recv() => {
                 match msg {
                     Some(Ok(Message::Binary(buf))) => {
+                        eprintln!("Received audio frame from browser: {} bytes", buf.len());
                         if let Err(e) = oa.send_audio(buf).await {
                             eprintln!("Failed to send audio: {}", e);
                             let _ = browser_ws.send(Message::Close(None)).await;

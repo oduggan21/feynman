@@ -15,11 +15,18 @@ export function useMic(ws: WebSocket, running: boolean) {
       srcRef.current = ctx.createMediaStreamSource(stream);
 
       const processor = ctx.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = e => {
-        if (!running || ws.readyState !== ws.OPEN) return;
+       processor.onaudioprocess = e => {
+        if (!running || ws.readyState !== WebSocket.OPEN) return;
         const pcm = e.inputBuffer.getChannelData(0);
-        ws.send(new Float32Array(pcm).buffer);   // 48 kHz mono PCM
-      };
+        const buf = new ArrayBuffer(pcm.length * 2);
+        const view = new DataView(buf);
+        for (let i = 0; i < pcm.length; i++) {
+            let s = Math.max(-1, Math.min(1, pcm[i]));
+            view.setInt16(i * 2, s * 32767, true); // true = little-endian
+        }
+        console.log("Sending audio frame of length", buf.byteLength);
+        ws.send(buf);
+        };
 
       srcRef.current.connect(processor);
       processor.connect(ctx.destination);
