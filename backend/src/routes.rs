@@ -265,6 +265,56 @@ async fn socket_task_with_openai(mut browser_ws: WebSocket, mut oa: OASocket) {
                     Ok(tungstenite::Message::Text(text)) => {
                         eprintln!("Received text from OpenAI: {}", text);
                         
+                        // Parse JSON to extract audio data if present
+                        if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&text) {
+                            // Check for audio-related events
+                            if let Some(event_type) = json_value.get("type").and_then(|v| v.as_str()) {
+                                match event_type {
+                                    "response.audio.delta" => {
+                                        if let Some(delta) = json_value.get("delta").and_then(|v| v.as_str()) {
+                                            // Decode base64 audio data
+                                            if let Ok(audio_bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, delta) {
+                                                eprintln!("Sending audio delta to browser: {} bytes", audio_bytes.len());
+                                                if browser_ws.send(Message::Binary(audio_bytes.into())).await.is_err() {
+                                                    eprintln!("Failed to send audio delta to browser");
+                                                    let _ = browser_ws.send(Message::Close(None)).await;
+                                                    oa.close().await.ok();
+                                                    break;
+                                                }
+                                            } else {
+                                                eprintln!("Failed to decode base64 audio delta");
+                                            }
+                                        }
+                                    }
+                                    "response.content_part.done" => {
+                                        // Check if this content part contains audio
+                                        if let Some(part) = json_value.get("part") {
+                                            if let Some(part_type) = part.get("type").and_then(|v| v.as_str()) {
+                                                if part_type == "audio" {
+                                                    eprintln!("Received audio content part completion");
+                                                    // Audio content part is complete - could send a marker to frontend if needed
+                                                }
+                                            }
+                                        }
+                                    }
+                                    "response.audio.done" => {
+                                        eprintln!("Received audio response completion");
+                                        // Audio response is complete - could send a marker to frontend if needed  
+                                    }
+                                    "response.audio_transcript.done" => {
+                                        if let Some(transcript) = json_value.get("transcript").and_then(|v| v.as_str()) {
+                                            eprintln!("Received audio transcript: {}", transcript);
+                                            // Could optionally send transcript to frontend
+                                        }
+                                    }
+                                    _ => {
+                                        // Other event types - just log for debugging
+                                        eprintln!("Received OpenAI event: {}", event_type);
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Handle conversation state based on OpenAI response
                         let _should_update_state = {
                             let _ctx = context.lock().await;

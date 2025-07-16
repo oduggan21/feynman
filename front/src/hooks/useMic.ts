@@ -61,7 +61,7 @@ export function useMic(ws: WebSocket, running: boolean) {
           const buf = new ArrayBuffer(pcm.length * 2);
           const view = new DataView(buf);
           for (let i = 0; i < pcm.length; i++) {
-            let s = Math.max(-1, Math.min(1, pcm[i]));
+            const s = Math.max(-1, Math.min(1, pcm[i]));
             view.setInt16(i * 2, s * 32767, true); // true = little-endian
           }
           console.log("Sending audio frame of length", buf.byteLength);
