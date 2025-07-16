@@ -16,9 +16,9 @@ export function useMic(ws: WebSocket, running: boolean) {
 
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       processor.onaudioprocess = e => {
-        if (!running || ws.readyState !== ws.OPEN) return;
+        if (!running || ws.readyState !== WebSocket.OPEN) return;
         const pcm = e.inputBuffer.getChannelData(0);
-        ws.send(new Float32Array(pcm).buffer);   // 48 kHz mono PCM
+        ws.send(new Float32Array(pcm).buffer);   // 48 kHz mono PCM
       };
 
       srcRef.current.connect(processor);
