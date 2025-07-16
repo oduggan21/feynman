@@ -19,7 +19,16 @@ export function useMic(ws: WebSocket | null, running: boolean) {
         processor.onaudioprocess = e => {
           if (!running || !ws || ws.readyState !== ws.OPEN) return;
           const pcm = e.inputBuffer.getChannelData(0);
-          ws.send(new Float32Array(pcm).buffer);   // 48 kHz mono PCM
+          
+          // Convert Float32Array to Int16Array (PCM16 format for OpenAI)
+          const pcm16 = new Int16Array(pcm.length);
+          for (let i = 0; i < pcm.length; i++) {
+            // Clamp to [-1, 1] and convert to 16-bit integer
+            const sample = Math.max(-1, Math.min(1, pcm[i]));
+            pcm16[i] = sample * 0x7FFF;
+          }
+          
+          ws.send(pcm16.buffer);
         };
 
         srcRef.current.connect(processor);

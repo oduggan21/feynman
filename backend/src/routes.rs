@@ -14,7 +14,11 @@ pub async fn handle_ws(ws: WebSocketUpgrade) -> Response {
     
     // Validate API key exists before accepting WebSocket connections
     let api_key = match std::env::var("OPENAI_API_KEY") {
-        Ok(key) if !key.is_empty() && key != "your_openai_api_key_here" => key,
+        Ok(key) if !key.is_empty() && key != "your_openai_api_key_here" && key.starts_with("sk-") => key,
+        Ok(key) if !key.is_empty() && key != "your_openai_api_key_here" => {
+            eprintln!("ERROR: OPENAI_API_KEY format appears invalid (should start with 'sk-')");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        },
         _ => {
             eprintln!("ERROR: OPENAI_API_KEY is not set or is invalid");
             return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
