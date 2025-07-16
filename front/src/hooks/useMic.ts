@@ -91,5 +91,5 @@ export function useMic(ws: WebSocket, running: boolean) {
         clearTimeout(silenceTimeoutRef.current);
       }
     };
-  }, [running, ws, isSpeaking]);
+  }, [running, ws]);
 }
