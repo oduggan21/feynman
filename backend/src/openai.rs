@@ -83,7 +83,9 @@ impl OASocket{
         let commit_event = json!({
             "type": "input_audio_buffer.commit"
         });
+        eprintln!("Sending input_audio_buffer.commit event");
         self.write.send(Message::Text(commit_event.to_string().into())).await?;
+        eprintln!("input_audio_buffer.commit event sent successfully");
         Ok(())
     }
 
@@ -95,7 +97,9 @@ impl OASocket{
                 "instructions": "Follow the Feynman tutor protocol."
             }
         });
+        eprintln!("Sending response.create event");
         self.write.send(Message::Text(response_event.to_string().into())).await?;
+        eprintln!("response.create event sent successfully");
         Ok(())
     }
     pub async fn next(&mut self) -> Result<Message> {

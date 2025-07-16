@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { openRelay } from "./services/ws";
 import { useMic } from "./hooks/useMic";
-import { playAudio } from "./services/audio";
+import { playAudio, initializeAudioContext } from "./services/audio";
 
 export default function App() {
   const [ws] = useState(() => openRelay());
@@ -24,7 +24,7 @@ export default function App() {
       setConnectionStatus("Connection error");
     };
 
-    ws.onmessage = e => {
+    ws.onmessage = async (e) => {
       if (typeof e.data === "string") {
         setLastMessage(e.data);
         console.log("Received text message:", e.data);
@@ -39,15 +39,27 @@ export default function App() {
         }
       } else {
         // Handle binary audio data
-        playAudio(e.data);
         console.log("Received audio data:", e.data.byteLength, "bytes");
+        try {
+          await playAudio(e.data);
+        } catch (error) {
+          console.error("Failed to play audio:", error);
+        }
       }
     };
   }, [ws]);
 
-  const handleStartStop = () => {
+  const handleStartStop = async () => {
     if (!running && connectionStatus.includes("Ready to start")) {
-      setRunning(true);
+      try {
+        // Initialize audio context with user interaction
+        await initializeAudioContext();
+        console.log("Audio context initialized successfully");
+        setRunning(true);
+      } catch (error) {
+        console.error("Failed to initialize audio context:", error);
+        setConnectionStatus("Audio initialization failed - check browser permissions");
+      }
     } else if (running) {
       // Send final commit when stopping
       ws.send("commit_audio");
